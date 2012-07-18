@@ -1,0 +1,184 @@
+<?php
+
+// $Id$
+
+/**
+ * @file
+ * General functions
+ */
+function rtmpswitcher_menu() {
+  $items['rtmpswitcher'] = array(
+    'title' => t('RTMP Video Switcher'),
+    'page callback' => 'channel_list',
+    'access arguments' => array('access content'),
+//    'access arguments' => array('administer site configuration'),
+  );
+
+  $items['rtmpswitcher/list'] = array(
+    'title' => t('Channels list'),
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => 1,
+  );
+
+  $items['rtmpswitcher/addchannel'] = array(
+    'title' => t('Add channel'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('channel_form'),
+    'access arguments' => array('access content'),
+//    'access arguments' => array('administer site configuration'),
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 2,
+  );
+
+  $items['rtmpswitcher/%channel/edit'] = array(
+    'title' => t('Edit channel'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('channel_form', 1),
+    'access callback' => TRUE,
+//    'access arguments' => array('administer site configuration'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['rtmpswitcher/%channel/delete'] = array(
+    'title' => t('Delete channel'),
+    'page callback' => 'channel_delete',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+//    'access arguments' => array('administer site configuration'),
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+function channel_list() {
+  try {
+    $tableHeader = array(t('Name'), t('Type'), t('Description'));
+    $tableData = array();
+    db_set_active('video_switch');
+    $res = db_query(
+        "select " .
+        "channels.id as id, channels.name as name, channels.is_enabled as is_enabled, channels.comment as comment, channel_types.chan_type as chan_type, channels.uri as uri " .
+        "from channels " .
+        "join channel_types on channel_types.id=channels.chan_type;");
+
+    foreach ($res as $row) {
+      $data[] = $row;
+    }
+    db_set_active('default');
+
+    foreach ($data as $ch) {
+      $actions = array(
+        l(t('edit'), 'rtmpswitcher/' . $ch->id . '/edit'),
+        l(t('delete'), 'rtmpswither/' . $ch->id . '/delete', array('query' => array('token' => drupal_get_token('channel-' . $ch->id)))),
+      );
+
+      $tableData[] = array(
+        'data' => array(
+          l($ch->name, $ch->uri),
+          $ch->chan_type,
+          $ch->comment,
+          implode(' | ', $actions),
+          '<iframe src="http://www.ustream.tv/embed/229923" height="200" scrolling="no" width="300"></iframe>'
+        ),
+        'id' => array('ch-' . $ch->id),
+      );
+    }
+
+    return theme('table', array('header' => $tableHeader, 'rows' => $tableData));
+  } catch (Exception $e) {
+    db_set_active('default');
+    return print($e);
+  }
+}
+
+function channel_form($form, &$form_state, $ch = null) {
+  db_set_active('video_switch');
+  $res = db_query("select * from channel_types;");
+
+  foreach ($res as $row) {
+    $channel_types[$row->id] = $row->chan_type;
+  }
+  db_set_active('default');
+
+  $form['name'] = array(
+    '#title' => t('Name'),
+//    '#description' => t('Channel name'),
+    '#type' => 'textfield',
+    '#default_value' => $ch ? $ch->name : '',
+    '#required' => true,
+  );
+
+  $form['type'] = array(
+    '#title' => t('Type'),
+//    '#description' => t('Channel type'),
+    '#type' => 'select',
+    '#options' => $channel_types,
+    '#default_value' => $ch ? $ch->chan_type : 1,
+    '#required' => true,
+  );
+
+  $form['uri'] = array(
+    '#title' => t('URI'),
+//    '#description' => t('Channel URI'),
+    '#type' => 'textfield',
+    '#default_value' => $ch ? $ch->uri : '',
+    '#required' => true,
+  );
+
+  $form['comment'] = array(
+    '#title' => t('Comment'),
+//    '#description' => t('Channel description'),
+    '#type' => 'textfield',
+    '#default_value' => $ch ? $ch->comment : '',
+  );
+
+  $form['enabled'] = array(
+    '#title' => t('Disable channel'),
+//    '#description' => t('Disable channel monitoring'),
+    '#type' => 'checkbox',
+    '#default_value' => $ch ? !$ch->is_enabled : false,
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => $ch ? t('Save') : t('Add'),
+  );
+
+  if ($ch) {
+    $form['id'] = array(
+      '#type' => 'value',
+      '#value' => $ch->id,
+    );
+  }
+
+  return $form;
+}
+
+function channel_form_submit($form, &$form_state) {
+  drupal_set_message(t('Channel submitted'));
+
+  drupal_goto('rtmpswitcher');
+}
+
+function channel_delete($ch) {
+  if (!drupal_valid_token($_GET['token'], 'album-' . $album->aid)) {
+    return drupal_access_denied();
+  } drupal_set_message(t('Channel deleted'));
+  drupal_goto('rtmpswitcher');
+}
+
+function channel_load($id) {
+  try {
+    db_set_active('video_switch');
+    $ret = db_query("SELECT * FROM {channels}  where {channels}.id = :id", array(':id' => $id))->fetchObject();
+    db_set_active('default');
+
+    return $ret;
+  } catch (Exception $e) {
+    db_set_active('default');
+    drupal_set_message(print($e));
+    return NULL;
+  }
+}
+
