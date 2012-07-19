@@ -71,8 +71,8 @@ function rtmpswitcher_menu() {
     'title' => t('Video switch'),
     'page callback' => 'video_switch_handle',
     'page arguments' => array(1),
-//    'access callback' => 'user_access',
-    'access callback' => TRUE,
+    'access callback' => 'user_access',
+//    'access callback' => TRUE,
     'access arguments' => array('administer site configuration'),
     'type' => MENU_CALLBACK,
   );
@@ -86,7 +86,7 @@ function rtmpswitcher_settings() {
     '#title' => t('Task directory'),
     '#description' => t('Path to directory for task. <a href="https://github.com/rtmp-switcher/backend/wiki/Communication-protocol-between-Web-frontend-and-Video-switcher-backend">See</a>'),
     '#type' => 'textfield',
-    '#default_value' => variable_get('rtmpswitcher_tasks_dir', '/var/www/run/rtpmswitcher-tasks'),
+    '#default_value' => variable_get('rtmpswitcher_tasks_dir', '/tmp/rtpmswitcher-tasks'),
     '#required' => TRUE,
   );
 
@@ -140,8 +140,8 @@ function channel_list() {
 
 function create_task_connect($ch_out, $ch_in) {
   $dir = variable_get('rtmpswitcher_tasks_dir');
-  $data = array($ch_out, $ch_in);
-  file_put_contents($dir . '/CONNECT-' . time() . '-' . rand(0, 1000) . '.task', json_encode($data));
+  $data = array($ch_in, $ch_out);
+  file_put_contents($dir . '/CONNECT-' . time() . rand(0, 1000) . '.task', json_encode($data));
 }
 
 function channel_form($form, &$form_state, $ch = null) {
@@ -252,7 +252,6 @@ function channel_form_submit($form, &$form_state) {
 }
 
 function channel_delete($ch) {
-//  return var_dump($ch);
 
   if (!drupal_valid_token($_GET['token'], 'channel-' . $ch->id)) {
     return drupal_access_denied();
@@ -294,17 +293,24 @@ function video_switch($chOut) {
       $tableData[] = array(
         'data' => array(
           $ch->embed_html,
+          $ch->name,
+          $ch->comment,
         ),
         'id' => array('ch-' . $ch->id),
-        'onclick' => 'javascript: video_switch("' . url('rtmpswitcher/switch', array('query' => array('chout' => $chOut->id, 'chin' => $ch->id))) . '")',
-        'onmouseover' => 'this.style.cursor=hand',
+        'onclick' => 'javascript: video_switch("' .
+          url('rtmpswitcher/switch', array('query' => array('chout' => $chOut->id, 'chin' => $ch->id))) . 
+          '", "'. 'ch-'. $ch->id . '")',
         'style' => 'cursor:hand;cursor:pointer'
       );
     }
+    
+    drupal_set_title(t('Manage channel: ' . $chOut->name));
+    $outch_html = '<div id="ch-out">' . $chOut->embed_html . '</div>';
 
-    return theme('table', array(
+    return $outch_html . theme('table', array(
           'rows' => $tableData,
-          'id' => 'ch_table'));
+          'attributes' => array(
+            'id' => 'channels-table')));
   } catch (Exception $e) {
     db_set_active('default');
   }
@@ -330,5 +336,6 @@ function video_switch_handle() {
 
   create_task_connect($chout, $chin);
 
-  return "create task $chout, $chin";
+  drupal_json_output("create task $chout, $chin");
+  exit;
 }
