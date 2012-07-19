@@ -7,11 +7,21 @@
  * General functions
  */
 function rtmpswitcher_menu() {
+
+  $items['admin/settings/rtmpswitcher'] = array(
+    'title' => 'RTMP Video Switcher',
+    'description' => 'Configure RTMP Video Switcher',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('rtmpswitcher_settings'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer site configuration'),
+  );
+
   $items['rtmpswitcher'] = array(
     'title' => t('RTMP Video Switcher'),
     'page callback' => 'channel_list',
-    'access arguments' => array('access content'),
-//    'access arguments' => array('administer site configuration'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer site configuration'),
   );
 
   $items['rtmpswitcher/list'] = array(
@@ -24,8 +34,8 @@ function rtmpswitcher_menu() {
     'title' => t('Add channel'),
     'page callback' => 'drupal_get_form',
     'page arguments' => array('channel_form'),
-    'access arguments' => array('access content'),
-//    'access arguments' => array('administer site configuration'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer site configuration'),
     'type' => MENU_LOCAL_TASK,
     'weight' => 2,
   );
@@ -34,8 +44,8 @@ function rtmpswitcher_menu() {
     'title' => t('Edit channel'),
     'page callback' => 'drupal_get_form',
     'page arguments' => array('channel_form', 1),
-    'access callback' => TRUE,
-//    'access arguments' => array('administer site configuration'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer site configuration'),
     'type' => MENU_CALLBACK,
   );
 
@@ -43,18 +53,49 @@ function rtmpswitcher_menu() {
     'title' => t('Delete channel'),
     'page callback' => 'channel_delete',
     'page arguments' => array(1),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['rtmpswitcher/%channel/video_switch'] = array(
+    'title' => t('Video switch'),
+    'page callback' => 'video_switch',
+    'page arguments' => array(1),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_CALLBACK,
+  );
+
+  $items['rtmpswitcher/switch'] = array(
+    'title' => t('Video switch'),
+    'page callback' => 'video_switch_handle',
+    'page arguments' => array(1),
+//    'access callback' => 'user_access',
     'access callback' => TRUE,
-//    'access arguments' => array('administer site configuration'),
+    'access arguments' => array('administer site configuration'),
     'type' => MENU_CALLBACK,
   );
 
   return $items;
 }
 
+function rtmpswitcher_settings() {
+
+  $form['rtmpswitcher_tasks_dir'] = array(
+    '#title' => t('Task directory'),
+    '#description' => t('Path to directory for task. <a href="https://github.com/rtmp-switcher/backend/wiki/Communication-protocol-between-Web-frontend-and-Video-switcher-backend">See</a>'),
+    '#type' => 'textfield',
+    '#default_value' => variable_get('rtmpswitcher_tasks_dir', '/var/www/run/rtpmswitcher-tasks'),
+    '#required' => TRUE,
+  );
+
+  return system_settings_form($form);
+  ;
+}
+
 function channel_list() {
   try {
-    $tableHeader = array(t('Video'), t('Name'), t('Type'), t('Description'), t('Actions') );
-    $tableData = array();
     db_set_active('video_switch');
     $res = db_query(
         "select " .
@@ -67,11 +108,17 @@ function channel_list() {
     }
     db_set_active('default');
 
+    $tableHeader = array(t('Video'), t('Name'), t('Type'), t('Description'), t('Actions'));
+    $tableData = array();
+
     foreach ($data as $ch) {
       $actions = array(
         l(t('edit'), 'rtmpswitcher/' . $ch->id . '/edit'),
         l(t('delete'), 'rtmpswitcher/' . $ch->id . '/delete', array('query' => array('token' => drupal_get_token('channel-' . $ch->id)))),
       );
+      if ($ch->chan_type == 'RTMP_OUT') {
+        $actions[] = l(t('video'), 'rtmpswitcher/' . $ch->id . '/video_switch');
+      }
 
       $tableData[] = array(
         'data' => array(
@@ -89,6 +136,12 @@ function channel_list() {
   } catch (Exception $e) {
     db_set_active('default');
   }
+}
+
+function create_task_connect($ch_out, $ch_in) {
+  $dir = variable_get('rtmpswitcher_tasks_dir');
+  $data = array($ch_out, $ch_in);
+  file_put_contents($dir . '/CONNECT-' . time() . '-' . rand(0, 1000) . '.task', json_encode($data));
 }
 
 function channel_form($form, &$form_state, $ch = null) {
@@ -218,6 +271,45 @@ function channel_delete($ch) {
   drupal_goto('rtmpswitcher');
 }
 
+function video_switch($chOut) {
+  drupal_add_js(drupal_get_path('module', 'rtmpswitcher') . '/js/video_switch.js', 'file');
+  try {
+    db_set_active('video_switch');
+    $res = db_query(
+        "select " .
+        "channels.id as id, channels.name as name, channels.is_enabled as is_enabled, channels.comment as comment, channel_types.chan_type as chan_type, channels.uri as uri, channels.embed_html as embed_html " .
+        "from channels " .
+        "join channel_types on channel_types.id=channels.chan_type " .
+        'where channel_types.chan_type=\'RTMP_IN\';');
+
+    foreach ($res as $row) {
+      $data[] = $row;
+    }
+    db_set_active('default');
+
+    $tableData = array();
+
+    foreach ($data as $ch) {
+
+      $tableData[] = array(
+        'data' => array(
+          $ch->embed_html,
+        ),
+        'id' => array('ch-' . $ch->id),
+        'onclick' => 'javascript: video_switch("' . url('rtmpswitcher/switch', array('query' => array('chout' => $chOut->id, 'chin' => $ch->id))) . '")',
+        'onmouseover' => 'this.style.cursor=hand',
+        'style' => 'cursor:hand;cursor:pointer'
+      );
+    }
+
+    return theme('table', array(
+          'rows' => $tableData,
+          'id' => 'ch_table'));
+  } catch (Exception $e) {
+    db_set_active('default');
+  }
+}
+
 function channel_load($id) {
   try {
     db_set_active('video_switch');
@@ -231,3 +323,12 @@ function channel_load($id) {
   }
 }
 
+function video_switch_handle() {
+
+  $chout = $_GET['chout'];
+  $chin = $_GET['chin'];
+
+  create_task_connect($chout, $chin);
+
+  return "create task $chout, $chin";
+}
