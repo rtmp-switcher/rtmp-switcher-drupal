@@ -1,5 +1,10 @@
 <?php
 
+
+global $dbName;
+$dbName = "video_switch";
+
+
 // $Id$
 
 /**
@@ -8,7 +13,7 @@
  */
 function rtmpswitcher_menu() {
 
-  $items['admin/settings/rtmpswitcher'] = array(
+  $items['admin/config/media/rtmpswitcher'] = array(
     'title' => 'RTMP Video Switcher',
     'description' => 'Configure RTMP Video Switcher',
     'page callback' => 'drupal_get_form',
@@ -72,7 +77,6 @@ function rtmpswitcher_menu() {
     'page callback' => 'video_switch_handle',
     'page arguments' => array(1),
     'access callback' => 'user_access',
-//    'access callback' => TRUE,
     'access arguments' => array('administer site configuration'),
     'type' => MENU_CALLBACK,
   );
@@ -95,8 +99,9 @@ function rtmpswitcher_settings() {
 }
 
 function channel_list() {
+  global $dbName;
   try {
-    db_set_active('video_switch');
+    db_set_active($dbName);
     $res = db_query(
         "select " .
         "channels.id as id, channels.name as name, channels.is_enabled as is_enabled, channels.comment as comment, channel_types.chan_type as chan_type, channels.uri as uri, channels.embed_html as embed_html " .
@@ -135,6 +140,7 @@ function channel_list() {
     return theme('table', array('header' => $tableHeader, 'rows' => $tableData));
   } catch (Exception $e) {
     db_set_active('default');
+    throw $e;
   }
 }
 
@@ -145,13 +151,19 @@ function create_task_connect($ch_out, $ch_in) {
 }
 
 function channel_form($form, &$form_state, $ch = null) {
-  db_set_active('video_switch');
-  $res = db_query("select * from channel_types;");
+  global $dbName;
+  try {
+    db_set_active($dbName);
+    $res = db_query("select * from channel_types;");
 
-  foreach ($res as $row) {
-    $channel_types[$row->id] = $row->chan_type;
+    foreach ($res as $row) {
+      $channel_types[$row->id] = $row->chan_type;
+    }
+    db_set_active('default');
+  } catch (Exception $e) {
+    db_set_active('default');
+    throw $e;
   }
-  db_set_active('default');
 
   $form['name'] = array(
     '#title' => t('Name'),
@@ -221,6 +233,8 @@ function channel_form($form, &$form_state, $ch = null) {
 }
 
 function channel_form_submit($form, &$form_state) {
+  global $dbName;
+
   $ch = array(
     'name' => $form_state['values']['name'],
     'chan_type' => $form_state['values']['chan_type'],
@@ -232,7 +246,7 @@ function channel_form_submit($form, &$form_state) {
   $chId = $form_state['values']['id'];
 
   try {
-    db_set_active('video_switch');
+    db_set_active('$dbName');
     if ($chId) {
       db_update('channels')->fields($ch)->condition('id', $chId, '=')
           ->execute();
@@ -243,7 +257,7 @@ function channel_form_submit($form, &$form_state) {
     db_set_active('default');
   } catch (Exception $e) {
     db_set_active('default');
-    return NULL;
+    throw $e;
   }
 
   drupal_set_message(t('Channel submitted'));
@@ -252,18 +266,19 @@ function channel_form_submit($form, &$form_state) {
 }
 
 function channel_delete($ch) {
+  global $dbName;
 
   if (!drupal_valid_token($_GET['token'], 'channel-' . $ch->id)) {
     return drupal_access_denied();
   }
 
   try {
-    db_set_active('video_switch');
+    db_set_active('$dbName');
     $ret = db_query("delete  FROM {channels}  where {channels}.id = :id", array(':id' => $ch->id));
     db_set_active('default');
   } catch (Exception $e) {
     db_set_active('default');
-    return NULL;
+    throw $e;
   }
 
   drupal_set_message(t('Channel deleted'));
@@ -271,9 +286,11 @@ function channel_delete($ch) {
 }
 
 function video_switch($chOut) {
+  global $dbName;
+
   drupal_add_js(drupal_get_path('module', 'rtmpswitcher') . '/js/video_switch.js', 'file');
   try {
-    db_set_active('video_switch');
+    db_set_active($dbName);
     $res = db_query(
         "select " .
         "channels.id as id, channels.name as name, channels.is_enabled as is_enabled, channels.comment as comment, channel_types.chan_type as chan_type, channels.uri as uri, channels.embed_html as embed_html " .
@@ -298,12 +315,12 @@ function video_switch($chOut) {
         ),
         'id' => array('ch-' . $ch->id),
         'onclick' => 'javascript: video_switch("' .
-          url('rtmpswitcher/switch', array('query' => array('chout' => $chOut->id, 'chin' => $ch->id))) . 
-          '", "'. 'ch-'. $ch->id . '")',
+        url('rtmpswitcher/switch', array('query' => array('chout' => $chOut->id, 'chin' => $ch->id))) .
+        '", "' . 'ch-' . $ch->id . '")',
         'style' => 'cursor:hand;cursor:pointer'
       );
     }
-    
+
     drupal_set_title(t('Manage channel: ' . $chOut->name));
     $outch_html = '<div id="ch-out">' . $chOut->embed_html . '</div>';
 
@@ -313,19 +330,22 @@ function video_switch($chOut) {
             'id' => 'channels-table')));
   } catch (Exception $e) {
     db_set_active('default');
+    throw $e;
   }
 }
 
 function channel_load($id) {
+  global $dbName;
+
   try {
-    db_set_active('video_switch');
+    db_set_active($dbName);
     $ret = db_query("SELECT * FROM {channels}  where {channels}.id = :id", array(':id' => $id))->fetchObject();
     db_set_active('default');
 
     return $ret;
   } catch (Exception $e) {
     db_set_active('default');
-    return NULL;
+    throw $e;
   }
 }
 

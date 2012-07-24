@@ -1,7 +1,7 @@
 ; $Id$
 name = RTMP Switcher Editor
 description = The UI part of the project <a href="https://github.com/rtmp-switcher/backend/wiki">RTMP Switcher<a>
-package = Video
-configure = admin/settings/rtmpswitcher
+package = Media
+configure = admin/config/media/rtmpswitcher
 version = 7.x-0.1
 core = 7.x
