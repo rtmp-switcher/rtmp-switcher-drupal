@@ -1,9 +1,17 @@
 <?php
 
-
 global $dbName;
 $dbName = "video_switch";
 
+global $tcUrl;
+$tcUrl = '\' flashver=FME/2.5\20(compatible;\20FMSc\201.0)\'';
+
+class ChannelType {
+
+  const IN = 1;
+  const OUT = 2;
+
+}
 
 // $Id$
 
@@ -103,10 +111,19 @@ function channel_list() {
   try {
     db_set_active($dbName);
     $res = db_query(
-        "select " .
-        "channels.id as id, channels.name as name, channels.is_enabled as is_enabled, channels.comment as comment, channel_types.chan_type as chan_type, channels.uri as uri, channels.embed_html as embed_html " .
-        "from channels " .
-        "join channel_types on channel_types.id=channels.chan_type;");
+        'select ' .
+        'channels.id as id, ' .
+        'channels.name as name, ' .
+        'channels.is_enabled as is_enabled, ' .
+        'channels.comment as comment, ' .
+        'channel_types.chan_type as chan_type, ' .
+        'channels.uri as uri, ' .
+        'channels.embed_html as embed_html, ' .
+        'channel_details.url as rtmp_uri ' .
+        'from channels ' .
+        'join channel_types on channel_types.id=channels.chan_type ' .
+        'left join channel_details on channel_details.channel=channels.id and channel_details.tm_created ' .
+        ' = (select max(cd2.tm_created) from channel_details as cd2 where cd2.channel = channels.id)');
 
     foreach ($res as $row) {
       $data[] = $row;
@@ -178,7 +195,7 @@ function channel_form($form, &$form_state, $ch = null) {
 //    '#description' => t('Channel type'),
     '#type' => 'select',
     '#options' => $channel_types,
-    '#default_value' => $ch ? $ch->chan_type : 1,
+    '#default_value' => $ch ? $ch->chan_type : ChannelType::IN,
     '#required' => true,
   );
 
@@ -202,6 +219,20 @@ function channel_form($form, &$form_state, $ch = null) {
 //    '#description' => t('Channel description'),
     '#type' => 'textarea',
     '#default_value' => $ch ? $ch->embed_html : '',
+    '#required' => true,
+  );
+
+  $rtmp_state = array(
+        ':input[name="chan_type"]' => array('value' => ChannelType::OUT));
+  $form['rtmp_uri'] = array(
+    '#title' => t('RTMP URI'),
+//    '#description' => t('Channel description'),
+    '#type' => 'textarea',
+    '#states' => array(
+      'visible' => $rtmp_state,
+      'required' => $rtmp_state,
+      ),
+    '#default_value' => $ch ? $ch->rtmp_uri: '',
   );
 
   $form['disable'] = array(
@@ -234,6 +265,7 @@ function channel_form($form, &$form_state, $ch = null) {
 
 function channel_form_submit($form, &$form_state) {
   global $dbName;
+  global $tcUrl;
 
   $ch = array(
     'name' => $form_state['values']['name'],
@@ -246,23 +278,42 @@ function channel_form_submit($form, &$form_state) {
   $chId = $form_state['values']['id'];
 
   try {
-    db_set_active('$dbName');
+    db_set_active($dbName);
     if ($chId) {
       db_update('channels')->fields($ch)->condition('id', $chId, '=')
           ->execute();
+      if ($ch['chan_type'] == ChannelType::OUT) {
+        $ch_detail = array(
+          'url' => $form_state['values']['rtmp_uri'],
+          'tcUrl' => $tcUrl,
+        );
+        db_update('channel_details')->fields($ch_detail)->condition('channel', $chId, '=')
+            ->execute();
+      }
     }
     else {
-      db_insert('channels')->fields($ch)->execute();
+      $chId = db_insert('channels')->fields($ch)->execute();
+      if ($ch['chan_type'] == ChannelType::OUT) {
+        $ch_detail = array(
+          'channel' => $chId,
+          'app' => '',
+          'playPath' => '',
+          'flashVer' => '',
+          'swfUrl' => '',
+          'pageUrl' => 'pageUrl',
+          'url' => $form_state['values']['rtmp_uri'],
+          'tcUrl' => $tcUrl,
+        );
+        db_insert('channel_details')->fields($ch_detail)->execute();
+      }
     }
     db_set_active('default');
+    drupal_set_message(t('Channel submitted'));
+    drupal_goto('rtmpswitcher');
   } catch (Exception $e) {
     db_set_active('default');
     throw $e;
   }
-
-  drupal_set_message(t('Channel submitted'));
-
-  drupal_goto('rtmpswitcher');
 }
 
 function channel_delete($ch) {
@@ -273,7 +324,7 @@ function channel_delete($ch) {
   }
 
   try {
-    db_set_active('$dbName');
+    db_set_active($dbName);
     $ret = db_query("delete  FROM {channels}  where {channels}.id = :id", array(':id' => $ch->id));
     db_set_active('default');
   } catch (Exception $e) {
@@ -339,7 +390,15 @@ function channel_load($id) {
 
   try {
     db_set_active($dbName);
-    $ret = db_query("SELECT * FROM {channels}  where {channels}.id = :id", array(':id' => $id))->fetchObject();
+    $query = db_select('channels');
+    $query->leftJoin('channel_details', 'channel_details', 'channels.id = channel_details.channel');
+    $query->fields('channels', array(
+      'id', 'name', 'chan_type', 'comment', 'is_enabled', 'uri', 'embed_html'));
+    $query->fields('channel_details', array('url'));
+    $query->condition('channels.id', $id, '=');
+    $query->orderBy('channel_details.tm_created', 'desc');
+
+    $ret = $query->execute()->fetchObject();
     db_set_active('default');
 
     return $ret;
